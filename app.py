@@ -4,7 +4,7 @@ from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from openai import OpenAI
 
-app = Flask(_name_)
+app = Flask(__name__)
 CORS(app)
 
 # Configuración de Base de Datos para Render
@@ -61,7 +61,6 @@ def procesar():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-if _name_ == "_main_":
-    # ESTO ES LO QUE ARREGLA EL ERROR DE RENDER
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
