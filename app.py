@@ -1,66 +1,79 @@
 import os
+import tempfile
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from openai import OpenAI
+from markitdown import MarkItDown
 
-app = Flask(__name__)
-CORS(app)
+__app = Flask(__name__)
+CORS(__app)
 
-# Configuración de Base de Datos para Render
-basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'estudiante_usac.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# Configuración Privada de Base de Datos
+__basedir = os.path.abspath(os.path.dirname(__file__))
+__app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(__basedir, 'tutor_ai.db')
+__app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-db = SQLAlchemy(app)
+__db = SQLAlchemy(__app)
 
-# Cliente de DeepSeek
-client = OpenAI(
+# Clientes de Procesamiento
+__client = OpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY"), 
     base_url="https://api.deepseek.com"
 )
+__md = MarkItDown()
 
-# Modelo SQL
-class Historial(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    tipo = db.Column(db.String(50))
-    contenido = db.Column(db.Text)
-    fecha = db.Column(db.DateTime, server_default=db.func.now())
+class __Historial(__db.Model):
+    id = __db.Column(__db.Integer, primary_key=True)
+    tipo = __db.Column(__db.String(50))
+    respuesta = __db.Column(__db.Text)
 
-# Crear tablas al iniciar
-with app.app_context():
-    db.create_all()
+with __app.app_context():
+    __db.create_all()
 
-@app.route('/')
-def home():
-    return "Servidor de Alessia activo y funcionando para la USAC"
-
-@app.route('/procesar', methods=['POST'])
+@__app.route('/procesar', methods=['POST'])
 def procesar():
     try:
-        data = request.json
-        tipo_solicitud = data.get('tipo')
-        texto_clase = data.get('texto')
+        __tipo = request.form.get('tipo', 'resumen')
+        __texto_dictado = request.form.get('texto', '')
+        __contenido_extraido = ""
 
-        response = client.chat.completions.create(
+        # Procesamiento de archivos multiformato
+        if 'file' in request.files:
+            __file = request.files['file']
+            __extension = os.path.splitext(__file.filename)[1]
+            
+            with tempfile.NamedTemporaryFile(delete=False, suffix=__extension) as __temp:
+                __file.save(__temp.name)
+                __conversion = __md.convert(__temp.name)
+                __contenido_extraido = __conversion.text_content
+                os.remove(__temp.name)
+
+        __prompt_final = f"{__texto_dictado}\n\nContenido extraído:\n{__contenido_extraido}"
+
+        __response = __client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": f"Eres un tutor de ingeniería experto. Genera un {tipo_solicitud}."},
-                {"role": "user", "content": texto_clase}
+                {
+                    "role": "system", 
+                    "content": "Eres Tutor AI, un asistente académico de ingeniería. Genera contenido educativo basado en el material proporcionado. Si se solicita un mapa, usa Mermaid.js."
+                },
+                {"role": "user", "content": __prompt_final}
             ]
         )
         
-        resultado = response.choices[0].message.content
+        __resultado = __response.choices[0].message.content
 
-        # Guardar en SQL
-        nuevo = Historial(tipo=tipo_solicitud, contenido=resultado)
-        db.session.add(nuevo)
-        db.session.commit()
+        # Guardado en base de datos
+        __nuevo_registro = __Historial(tipo=__tipo, respuesta=__resultado)
+        __db.session.add(__nuevo_registro)
+        __db.session.commit()
 
-        return jsonify({"respuesta": resultado})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"respuesta": __resultado})
+
+    except Exception as __e:
+        return jsonify({"error": str(__e)}), 500
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    __port = int(os.environ.get("PORT", 5000))
+    __app.run(host='0.0.0.0', port=__port)
