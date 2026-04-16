@@ -6,71 +6,78 @@ from flask_sqlalchemy import SQLAlchemy
 from openai import OpenAI
 from markitdown import MarkItDown
 
-__app = Flask(__name__)
-CORS(__app)
+_app = Flask(__name__)
+CORS(_app)
 
-# Configuración Privada de Base de Datos
-__basedir = os.path.abspath(os.path.dirname(__file__))
-__app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(__basedir, 'tutor_ai.db')
-__app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# Configuración de Base de Datos
+_basedir = os.path.abspath(os.path.dirname(__file__))
+_app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(_basedir, 'tutor_ai.db')
+_app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-__db = SQLAlchemy(__app)
+_db = SQLAlchemy(_app)
 
 # Clientes de Procesamiento
-__client = OpenAI(
+_client = OpenAI(
     api_key=os.getenv("DEEPSEEK_API_KEY"), 
     base_url="https://api.deepseek.com"
 )
-__md = MarkItDown()
+_md = MarkItDown()
 
-class __Historial(__db.Model):
-    id = __db.Column(__db.Integer, primary_key=True)
-    tipo = __db.Column(__db.String(50))
-    respuesta = __db.Column(__db.Text)
+# Clase corregida (usando un solo _ para evitar el error de Render)
+class Historial(_db.Model):
+    id = _db.Column(_db.Integer, primary_key=True)
+    tipo = _db.Column(_db.String(50))
+    respuesta = _db.Column(_db.Text)
 
-with __app.app_context():
-    __db.create_all()
+with _app.app_context():
+    _db.create_all()
 
-@__app.route('/procesar', methods=['POST'])
+@_app.route('/')
+def home():
+    return "Tutor AI - Sistema Académico USAC Online"
+
+@_app.route('/procesar', methods=['POST'])
 def procesar():
     try:
-        __tipo = request.form.get('tipo', 'resumen')
-        __texto_dictado = request.form.get('texto', '')
-        __contenido_extraido = ""
+        _tipo = request.form.get('tipo', 'resumen')
+        _texto_dictado = request.form.get('texto', '')
+        _contenido_extraido = ""
 
-        # Procesamiento de archivos multiformato
         if 'file' in request.files:
-            __file = request.files['file']
-            __extension = os.path.splitext(__file.filename)[1]
+            _file = request.files['file']
+            _extension = os.path.splitext(_file.filename)[1]
             
-            with tempfile.NamedTemporaryFile(delete=False, suffix=__extension) as __temp:
-                __file.save(__temp.name)
-                __conversion = __md.convert(__temp.name)
-                __contenido_extraido = __conversion.text_content
-                os.remove(__temp.name)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=_extension) as _temp:
+                _file.save(_temp.name)
+                _conversion = _md.convert(_temp.name)
+                _contenido_extraido = _conversion.text_content
+                os.remove(_temp.name)
 
-        __prompt_final = f"{__texto_dictado}\n\nContenido extraído:\n{__contenido_extraido}"
+        _prompt_final = f"{_texto_dictado}\n\nContenido extraído:\n{_contenido_extraido}"
 
-        __response = __client.chat.completions.create(
+        _response = _client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": "Eres Tutor AI, un asistente de ingeniería diseñado para resolver tareas, analizar documentos (PDF, Word, Excel, PPT) y transcribir clases. Responde de forma clara y técnica."},
-                {"role": "user", "content": prompt_final}
+                {
+                    "role": "system", 
+                    "content": "Eres Tutor AI, asistente de ingeniería. Genera contenido educativo. Para mapas, usa Mermaid.js."
+                },
+                {"role": "user", "content": _prompt_final}
             ]
         )
         
-        __resultado = __response.choices[0].message.content
+        _resultado = _response.choices[0].message.content
 
         # Guardado en base de datos
-        __nuevo_registro = __Historial(tipo=__tipo, respuesta=__resultado)
-        __db.session.add(__nuevo_registro)
-        __db.session.commit()
+        _nuevo_registro = Historial(tipo=_tipo, respuesta=_resultado)
+        _db.session.add(_nuevo_registro)
+        _db.session.commit()
 
-        return jsonify({"respuesta": __resultado})
+        return jsonify({"respuesta": _resultado})
 
-    except Exception as __e:
-        return jsonify({"error": str(__e)}), 500
+    except Exception as _e:
+        return jsonify({"error": str(_e)}), 500
 
 if __name__ == "__main__":
-    __port = int(os.environ.get("PORT", 5000))
-    __app.run(host='0.0.0.0', port=__port)
+    _port = int(os.environ.get("PORT", 5000))
+    _app.run(host='0.0.0.0', port=_port)
