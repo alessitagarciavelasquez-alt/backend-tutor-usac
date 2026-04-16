@@ -54,11 +54,8 @@ def procesar():
         __response = __client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {
-                    "role": "system", 
-                    "content": "Eres Tutor AI, un asistente académico de ingeniería. Genera contenido educativo basado en el material proporcionado. Si se solicita un mapa, usa Mermaid.js."
-                },
-                {"role": "user", "content": __prompt_final}
+                {"role": "system", "content": "Eres Tutor AI, un asistente de ingeniería diseñado para resolver tareas, analizar documentos (PDF, Word, Excel, PPT) y transcribir clases. Responde de forma clara y técnica."},
+                {"role": "user", "content": prompt_final}
             ]
         )
         
