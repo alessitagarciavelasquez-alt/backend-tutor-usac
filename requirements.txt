@@ -1,6 +1,6 @@
 flask
 flask-cors
 flask-sqlalchemy
+flask-talisman
 openai
-gunicorn
 markitdown
