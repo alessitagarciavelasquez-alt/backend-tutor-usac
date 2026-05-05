@@ -7,14 +7,15 @@ from flask_talisman import Talisman
 from openai import OpenAI
 from markitdown import MarkItDown
 
+# Inicialización de la App con doble guion bajo
 app = Flask(__name__)
 
 # SEGURIDAD Y COMPATIBILIDAD: Habilita micrófono y archivos en Brave/Móviles
 Talisman(app, content_security_policy=None) 
 CORS(app)
 
-# Configuración de Base de Datos
-basedir = os.path.abspath(os.path.dirname(_file_))
+# Configuración de Base de Datos (Ajustado con doble guion bajo en __file__)
+basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'tutor_ai.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -38,7 +39,7 @@ def procesar():
         texto_usuario = request.form.get('texto', '')
         contenido_extraido = ""
 
-        # Procesamiento rápido de archivos
+        # Procesamiento de archivos (PDF, Word, etc.)
         if 'file' in request.files and request.files['file'].filename != '':
             archivo = request.files['file']
             extension = os.path.splitext(archivo.filename)[1]
@@ -48,8 +49,7 @@ def procesar():
                 contenido_extraido = f"\n[Documento para analizar]:\n{conversion.text_content}"
                 os.remove(tmp.name)
         
-        # REFUERZO DE IDENTIDAD Y AUTONOMÍA
-        # Se establece "Tutor AI" como único nombre oficial
+        # REFUERZO DE IDENTIDAD Y AUTONOMÍA: Tutor AI
         system_msg = (
             "Tu nombre es exclusivamente 'Tutor AI'. Eres un asistente de ingeniería de la USAC. "
             "Si te preguntan quién eres, responde siempre como Tutor AI. "
@@ -70,7 +70,7 @@ def procesar():
         
         resultado_ai = response.choices[0].message.content
         
-        # Persistencia de datos
+        # Guardar en la base de datos
         nuevo = Historial(tipo=tipo_solicitud, respuesta=resultado_ai)
         db.session.add(nuevo)
         db.session.commit()
@@ -80,5 +80,5 @@ def procesar():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
