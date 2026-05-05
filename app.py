@@ -7,14 +7,13 @@ from flask_talisman import Talisman
 from openai import OpenAI
 from markitdown import MarkItDown
 
-# Inicialización de la App con doble guion bajo
 app = Flask(__name__)
 
-# SEGURIDAD Y COMPATIBILIDAD: Habilita micrófono y archivos en Brave/Móviles
+# SEGURIDAD: Vital para que el micrófono y archivos funcionen en móviles y Brave
 Talisman(app, content_security_policy=None) 
 CORS(app)
 
-# Configuración de Base de Datos (Ajustado con doble guion bajo en __file__)
+# Configuración de Base de Datos (Trabajo de Alessia y Stefan)
 basedir = os.path.abspath(os.path.dirname(__file__))
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'tutor_ai.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -39,27 +38,42 @@ def procesar():
         texto_usuario = request.form.get('texto', '')
         contenido_extraido = ""
 
-        # Procesamiento de archivos (PDF, Word, etc.)
+        # 1. EXTRACCIÓN DE DATOS (Si hay archivo, se lee; si no, se ignora)
         if 'file' in request.files and request.files['file'].filename != '':
             archivo = request.files['file']
             extension = os.path.splitext(archivo.filename)[1]
             with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:
                 archivo.save(tmp.name)
                 conversion = md.convert(tmp.name)
-                contenido_extraido = f"\n[Documento para analizar]:\n{conversion.text_content}"
+                contenido_extraido = conversion.text_content
                 os.remove(tmp.name)
         
-        # REFUERZO DE IDENTIDAD Y AUTONOMÍA: Tutor AI
+        # 2. CONFIGURACIÓN DEL CEREBRO (Tutor AI)
         system_msg = (
-            "Tu nombre es exclusivamente 'Tutor AI'. Eres un asistente de ingeniería de la USAC. "
-            "Si te preguntan quién eres, responde siempre como Tutor AI. "
-            "Posees razonamiento autónomo: si recibes un tema, desarróllalo; si recibes un problema, resuélvelo. "
-            "No esperes instrucciones extras. Piensa y actúa de forma proactiva como un experto. "
-            "Usa Mermaid.js para visualizaciones técnicas."
+            "Tu nombre es exclusivamente 'Tutor AI', asistente experto de ingeniería de la USAC. "
+            "Eres proactivo y autónomo. Tu misión es ejecutar órdenes con rigor académico. "
+            "Si hay un documento adjunto, úsalo como base primaria de información. "
+            "Si NO hay documento, realiza una investigación profunda usando tus propios conocimientos. "
+            "Usa Mermaid.js para diagramas y responde siempre con autoridad técnica."
         )
 
-        prompt_final = f"Consulta del estudiante: {texto_usuario} {contenido_extraido}"
+        # 3. LÓGICA DE FUSIÓN (Aquí es donde "piensa sola")
+        # Construimos un prompt que obliga a la IA a mezclar la orden con el archivo
+        if contenido_extraido:
+            prompt_final = (
+                f"CONTEXTO DEL ARCHIVO ADJUNTO:\n{contenido_extraido}\n\n"
+                f"INSTRUCCIÓN DEL USUARIO:\n{texto_usuario}\n\n"
+                "EJECUCIÓN: Basándote en el archivo anterior (si es relevante) y en tu inteligencia, "
+                "cumple la instrucción del usuario de forma completa y detallada."
+            )
+        else:
+            prompt_final = (
+                f"INSTRUCCIÓN DE INVESTIGACIÓN: {texto_usuario}\n\n"
+                "EJECUCIÓN: No hay archivos adjuntos. Desarrolla este tema a profundidad, "
+                "investiga conceptos relacionados y presenta una solución completa de ingeniería."
+            )
 
+        # 4. LLAMADA A LA API
         response = client.chat.completions.create(
             model="deepseek-chat",
             messages=[
@@ -70,7 +84,7 @@ def procesar():
         
         resultado_ai = response.choices[0].message.content
         
-        # Guardar en la base de datos
+        # 5. GUARDADO EN SQL
         nuevo = Historial(tipo=tipo_solicitud, respuesta=resultado_ai)
         db.session.add(nuevo)
         db.session.commit()
