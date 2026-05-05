@@ -7,7 +7,7 @@ from flask_talisman import Talisman
 from openai import OpenAI
 from markitdown import MarkItDown
 
-app = Flask(_name_)
+app = Flask(__name__)
 
 # SEGURIDAD Y COMPATIBILIDAD: Habilita micrófono y archivos en Brave/Móviles
 Talisman(app, content_security_policy=None) 
