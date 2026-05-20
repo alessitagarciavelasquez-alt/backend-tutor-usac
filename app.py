@@ -9,8 +9,22 @@ from openai import OpenAI  # Importa la interfaz cliente oficial para la comunic
 from markitdown import MarkItDown  # Importa el procesador multimedia especializado en transformar archivos PDF e imágenes en texto plano
 
 app = Flask(__name__)  # Instancia la aplicación web de Flask tomando como núcleo el nombre de este archivo fuente
-Talisman(app, content_security_policy=None)  # Encripta el tráfico forzando HTTPS para que Brave y los celulares den permisos de voz
-CORS(app)  # Abre las directivas CORS de Flask para permitir llamadas asíncronas desde cualquier origen web de interfaz
+
+# ==========================================================================================
+# SOLUCIÓN CRÍTICA DE CONECTIVIDAD: Configuración explícita de CORS y Talisman sin conflicto
+# ==========================================================================================
+# 1. Configuramos CORS detallado antes que Talisman para que registre los métodos de control previos (OPTIONS)
+CORS(app, resources={r"/*": {"origins": "*", "methods": ["POST", "OPTIONS"], "allow_headers": ["Content-Type"]}})
+
+# 2. Forzamos HTTPS mediante Talisman pero desactivamos la inyección rígida de políticas que borran las cabeceras de CORS externo
+Talisman(
+    app,
+    content_security_policy=None,
+    force_https=True,
+    strict_transport_security=True,
+    session_cookie_secure=True
+)
+# ==========================================================================================
 
 basedir = os.path.abspath(os.path.dirname(__file__))  # Determina de manera absoluta la ubicación de la carpeta raíz del proyecto
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'tutor_ai.db')  # Configura la ruta de la base de datos SQLite local
