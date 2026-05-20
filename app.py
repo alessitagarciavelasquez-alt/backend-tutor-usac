@@ -6,26 +6,22 @@ from flask_cors import CORS  # Importa la extensión para mitigar bloqueos de se
 from flask_sqlalchemy import SQLAlchemy  # Importa el ORM relacional para conectar y manipular bases de datos SQL de forma abstracta
 from flask_talisman import Talisman  # Importa el paquete de seguridad web para forzar políticas de cabecera y conexiones HTTPS
 from openai import OpenAI  # Importa la interfaz cliente oficial para la comunicación e inferencias con inteligencias artificiales
-from markitdown import MarkItDown  # Importa el procesador multimedia especializado en transformar archivos PDF e imágenes en texto plano
 
 app = Flask(__name__)  # Instancia la aplicación web de Flask tomando como núcleo el nombre de este archivo fuente
 
 # ==========================================================================================
 # CONFIGURACIÓN DE CONECTIVIDAD BLINDADA (VERSIÓN PASIVA PARA EXAMEN)
 # ==========================================================================================
-# 1. CORS totalmente abierto para aceptar cualquier origen externo
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["POST", "OPTIONS"], "allow_headers": ["Content-Type"]}})
 
-# 2. Talisman optimizado: Mantiene HTTPS activo (para el micrófono) pero apaga las restricciones rígidas
 Talisman(
     app,
     content_security_policy=None,
     force_https=True,
-    strict_transport_security=False,  # <-- APAGADO: Evita el bloqueo estricto de dominios temporales
-    session_cookie_secure=False,      # <-- APAGADO: Permite que Netlify envíe datos sin cookies previas
-    frame_options='ALLOWALL'          # <-- ABIERTO: Permite la interacción limpia entre interfaces
+    strict_transport_security=False,
+    session_cookie_secure=False,
+    frame_options='ALLOWALL'
 )
-# ==========================================================================================
 # ==========================================================================================
 
 basedir = os.path.abspath(os.path.dirname(__file__))  # Determina de manera absoluta la ubicación de la carpeta raíz del proyecto
@@ -34,7 +30,6 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  # Desactiva las notificaci
 db = SQLAlchemy(app)  # Inicializa el entorno de persistencia de datos vinculándolo con la configuración de Flask anterior
 
 client = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com")  # Inicializa el cliente API de DeepSeek
-md = MarkItDown()  # Instancia el motor MarkItDown para habilitar el despiece de archivos e imágenes dentro de la aplicación
 
 class Historial(db.Model):  # Declara la estructura del modelo relacional para la tabla de historial académico
     id = db.Column(db.Integer, primary_key=True)  # Define una columna numérica entera para la llave primaria autoincremental
@@ -54,6 +49,11 @@ def procesar():  # Define la función controladora de procesos que se ejecutará
         if 'file' in request.files and request.files['file'].filename != '':  # Sincronización Alessia: Evalúa si viene la clave 'file' con datos
             archivo = request.files['file']  # Aísla el objeto binario del documento adjunto en una variable local de control
             extension = os.path.splitext(archivo.filename)[1]  # Extrae la extensión del archivo para asegurar la consistencia física
+            
+            # SOLUCIÓN DE MEMORIA: Se importa e instancia MarkItDown de forma perezosa (Lazy Load) solo si el alumno sube un archivo
+            from markitdown import MarkItDown
+            md = MarkItDown()
+            
             with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:  # Crea un archivo temporal seguro en el almacenamiento
                 archivo.save(tmp.name)  # Guarda físicamente el flujo binario subido por el estudiante dentro del archivo temporal
                 conversion = md.convert(tmp.name)  # Ejecuta el algoritmo de transcripción léxica e interpretación sobre el temporal
