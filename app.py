@@ -11,19 +11,21 @@ from markitdown import MarkItDown  # Importa el procesador multimedia especializ
 app = Flask(__name__)  # Instancia la aplicación web de Flask tomando como núcleo el nombre de este archivo fuente
 
 # ==========================================================================================
-# SOLUCIÓN CRÍTICA DE CONECTIVIDAD: Configuración explícita de CORS y Talisman sin conflicto
+# CONFIGURACIÓN DE CONECTIVIDAD BLINDADA (VERSIÓN PASIVA PARA EXAMEN)
 # ==========================================================================================
-# 1. Configuramos CORS detallado antes que Talisman para que registre los métodos de control previos (OPTIONS)
+# 1. CORS totalmente abierto para aceptar cualquier origen externo
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["POST", "OPTIONS"], "allow_headers": ["Content-Type"]}})
 
-# 2. Forzamos HTTPS mediante Talisman pero desactivamos la inyección rígida de políticas que borran las cabeceras de CORS externo
+# 2. Talisman optimizado: Mantiene HTTPS activo (para el micrófono) pero apaga las restricciones rígidas
 Talisman(
     app,
     content_security_policy=None,
     force_https=True,
-    strict_transport_security=True,
-    session_cookie_secure=True
+    strict_transport_security=False,  # <-- APAGADO: Evita el bloqueo estricto de dominios temporales
+    session_cookie_secure=False,      # <-- APAGADO: Permite que Netlify envíe datos sin cookies previas
+    frame_options='ALLOWALL'          # <-- ABIERTO: Permite la interacción limpia entre interfaces
 )
+# ==========================================================================================
 # ==========================================================================================
 
 basedir = os.path.abspath(os.path.dirname(__file__))  # Determina de manera absoluta la ubicación de la carpeta raíz del proyecto
