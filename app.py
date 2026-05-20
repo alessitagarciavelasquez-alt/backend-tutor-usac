@@ -50,15 +50,17 @@ def procesar():  # Define la función controladora de procesos que se ejecutará
             archivo = request.files['file']  # Aísla el objeto binario del documento adjunto en una variable local de control
             extension = os.path.splitext(archivo.filename)[1]  # Extrae la extensión del archivo para asegurar la consistencia física
             
-            # SOLUCIÓN DE MEMORIA: Se importa e instancia MarkItDown de forma perezosa (Lazy Load) solo si el alumno sube un archivo
-            from markitdown import MarkItDown
-            md = MarkItDown()
-            
-            with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:  # Crea un archivo temporal seguro en el almacenamiento
-                archivo.save(tmp.name)  # Guarda físicamente el flujo binario subido por el estudiante dentro del archivo temporal
-                conversion = md.convert(tmp.name)  # Ejecuta el algoritmo de transcripción léxica e interpretación sobre el temporal
-                contenido_extraido = conversion.text_content  # Extrae la cadena de caracteres procesada del documento hacia la memoria
-                os.remove(tmp.name)  # Destruye el archivo temporal del disco duro de inmediato para evitar desbordamientos de cuota
+            try:
+                # Se importa localmente para que Render no muera en consultas de voz/texto puro
+                from markitdown import MarkItDown
+                md = MarkItDown()
+                with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as tmp:  # Crea un archivo temporal seguro en el almacenamiento
+                    archivo.save(tmp.name)  # Guarda físicamente el flujo binario subido por el estudiante dentro del archivo temporal
+                    conversion = md.convert(tmp.name)  # Ejecuta el algoritmo de transcripción léxica e interpretación sobre el temporal
+                    contenido_extraido = conversion.text_content  # Extrae la cadena de caracteres procesada del documento hacia la memoria
+                    os.remove(tmp.name)  # Destruye el archivo temporal del disco duro de inmediato para evitar desbordamientos de cuota
+            except Exception as err_file:
+                contenido_extraido = f"[Error local al procesar archivo por límites de hardware en Render: {str(err_file)}]"
         
         system_msg = (  # Redacta las directivas del prompt de sistema para controlar el comportamiento del modelo de IA
             "Tu nombre es exclusivamente 'Tutor AI'. Eres un experto de ingeniería de la USAC. "  # Define la marca comercial obligatoria
@@ -71,34 +73,4 @@ def procesar():  # Define la función controladora de procesos que se ejecutará
         if contenido_extraido:  # Evalúa de manera condicional si el flujo del sistema logró extraer caracteres de un archivo adjunto
             prompt_final = (  # Estructura el prompt compuesto para inyectar la carga de datos multimedia al modelo cognitivo
                 f"CONTEXTO DEL ARCHIVO SOPORTE:\n{contenido_extraido}\n\n"  # Inyecta el contenido legible recuperado del documento
-                f"INSTRUCCIÓN DEL ESTUDIANTE: {texto_usuario}\n"  # Añade la orden textual escrita o dictada por voz del usuario
-                "EJECUCIÓN: Analiza el contexto y resuelve de forma proactiva la instrucción."  # Define la directiva final de procesamiento
-            )  # Cierra el bloque de asignación de la variable para adjuntos
-        else:  # Define el flujo operativo alterno en caso de que la consulta sea estrictamente textual, sin archivos
-            prompt_final = (  # Construye el prompt limpio aislado de manera que no herede basura analítica del historial anterior
-                f"ORDEN DIRECTA ACTUAL: {texto_usuario}\n"  # Asigna directamente el comando puro ingresado por el estudiante
-                "EJECUCIÓN: Resuelve esta consulta de forma aislada y limpia. Olvida contextos matemáticos anteriores."  # Fuerza aislamiento lógico
-            )  # Cierra la construcción del prompt simple de texto
-
-        response = client.chat.completions.create(  # Despierta el canal asíncrono para enviar los datos de ingeniería al servidor DeepSeek
-            model="deepseek-chat",  # Especifica el modelo optimizado de procesamiento de texto a invocar en los servidores de la IA
-            messages=[  # Abre el arreglo de roles exigido por la arquitectura para la construcción secuencial del diálogo
-                {"role": "system", "content": system_msg},  # Carga el mensaje estructural de sistema con las directivas de Tutor AI
-                {"role": "user", "content": prompt_final}  # Adjunta la instrucción académica final formateada con o sin PDF
-            ],  # Cierra el arreglo de control de roles lingüísticos de la inferencia
-            temperature=0.3  # Setea una temperatura baja para garantizar el rigor matemático y erradicar alucinaciones analíticas
-        )  # Cierra el objeto constructor de la petición de red asíncrona
-        
-        resultado_ai = response.choices[0].message.content  # Extrae el texto plano de respuesta generado del objeto respuesta de DeepSeek
-        
-        nuevo = Historial(tipo=tipo_solicitud, respuesta=resultado_ai)  # Instancia una nueva fila de la entidad Historial para la base de datos
-        db.session.add(nuevo)  # Encola la fila recién estructurada en la cola de transacciones pendientes del motor ORM
-        db.session.commit()  # Consolida los cambios impactando físicamente el archivo relacional de la base de datos de auditoría
-
-        return jsonify({"respuesta": resultado_ai})  # Retorna hacia el cliente HTML un objeto JSON codificado con la respuesta limpia
-
-    except Exception as e:  # Captura de forma segura cualquier fallo físico de red, API o base de datos que ocurra en el trayecto
-        return jsonify({"error": str(e)}), 500  # Envía una respuesta JSON con código de estado HTTP 500 para notificar fallos en el Frontend
-
-if __name__ == "__main__":  # Evalúa si el script está siendo ejecutado directamente por la consola y no invocado por otra rutina externos
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))  # Arranca el servidor de Flask en el puerto físico de producción asignado
+                f"INSTRUCCIÓN DEL ESTUDIANTE: {texto_usuario}\n"  # Añade la orden textual escrita o dictada por voz del
