@@ -1,4 +1,3 @@
-# app.py - Archivo de lógica de producción para la plataforma académica Tutor AI
 import os  # Permite leer variables de entorno y manejar rutas del sistema de archivos
 import io  # Permite trabajar con archivos en memoria sin necesidad de guardarlos en disco
 import base64  # Convierte imágenes binarias a texto Base64 para enviarlas a la API de visión de IA
@@ -63,36 +62,40 @@ def extraer_contenido(archivo, extension):  # Recibe el objeto del archivo y su 
         except Exception as e:  # Captura cualquier error de lectura
             return None, f"[Error leyendo archivo de texto: {str(e)}]"  # Retorna None y el mensaje de error
 
-    # ── PDF (texto normal Y escaneado) [PASO 2 INTEGRADO] ───────
-    elif extension == '.pdf':  # Verifica si el archivo es un PDF
-        try:
-            from pypdf import PdfReader  # Intenta primero extraer texto seleccionable
-            pdf_bytes = archivo.read()  # Lee los bytes del PDF una sola vez en memoria
-            reader = PdfReader(io.BytesIO(pdf_bytes))  # Carga el PDF desde memoria
-            paginas = []  # Lista para acumular texto de cada página
-            for pagina in reader.pages:  # Itera sobre cada página
-                texto = pagina.extract_text()  # Intenta extraer texto seleccionable
-                if texto and texto.strip():  # Si la página tiene texto real
-                    paginas.append(texto)  # Lo acumula
-            if paginas:  # Si encontró texto en al menos una página
-                return "\n".join(paginas), None  # Retorna el texto extraído normalmente
+    # ── PDF (texto seleccionable Y escaneado) ───────────────────
+    elif extension == '.pdf':  # Verifica si el archivo es un PDF de cualquier tipo
+        try:  # Intenta primero extraer texto seleccionable con pypdf
+            from pypdf import PdfReader  # Importa el lector de PDF solo cuando se necesita
+            pdf_bytes = archivo.read()  # Lee los bytes completos del PDF una sola vez en memoria
+            reader = PdfReader(io.BytesIO(pdf_bytes))  # Carga el PDF desde memoria sin guardarlo en disco
+            paginas = []  # Lista para acumular el texto extraído de cada página
+            for pagina in reader.pages:  # Itera sobre cada página del documento PDF
+                texto = pagina.extract_text()  # Intenta extraer texto seleccionable de la página
+                if texto and texto.strip():  # Solo agrega si la página contiene texto real no vacío
+                    paginas.append(texto)  # Acumula el texto de la página en la lista
 
-            # Si no hay texto, es un PDF escaneado — lo convierte a imágenes
-            import fitz  # PyMuPDF para renderizar páginas como imágenes
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")  # Abre el PDF desde memoria
-            imagenes_b64 = []  # Lista para acumular imágenes Base64 de cada página
-            max_paginas = min(len(doc), 10)  # Limita a 10 páginas para no exceder la API
-            for num_pag in range(max_paginas):  # Itera sobre las páginas limitadas
-                pagina = doc[num_pag]  # Obtiene la página actual
-                mat = fitz.Matrix(1.5, 1.5)  # Escala de 1.5x para buena resolución sin exceder tamaño
-                pix = pagina.get_pixmap(matrix=mat)  # Renderiza la página como imagen en memoria
-                img_bytes = pix.tobytes("jpeg")  # Convierte el pixmap a bytes JPEG
-                b64 = base64.b64encode(img_bytes).decode('utf-8')  # Codifica en Base64
-                imagenes_b64.append(b64)  # Agrega la imagen de la página a la lista
-            doc.close()  # Cierra el documento para liberar memoria
-            return None, None, imagenes_b64  # Retorna lista de imágenes Base64 (una por página)
-        except Exception as e:
-            return None, f"[Error al leer PDF: {str(e)}]"
+            if paginas:  # Si encontró texto seleccionable en al menos una página es un PDF normal
+                return "\n".join(paginas), None  # Retorna el texto completo extraído sin errores
+
+            # Si no hay texto seleccionable es un PDF escaneado, lo convierte a imágenes
+            import fitz  # Importa PyMuPDF para renderizar páginas del PDF como imágenes
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")  # Abre el PDF escaneado desde memoria
+            imagenes_b64 = []  # Lista para acumular las imágenes Base64 de cada página renderizada
+            max_paginas = min(len(doc), 10)  # Limita el procesamiento a máximo 10 páginas para no exceder la API
+
+            for num_pag in range(max_paginas):  # Itera sobre cada página hasta el límite establecido
+                pagina = doc[num_pag]  # Obtiene el objeto de la página actual del documento
+                mat = fitz.Matrix(1.5, 1.5)  # Define escala 1.5x para buena resolución sin exceder tamaño máximo
+                pix = pagina.get_pixmap(matrix=mat)  # Renderiza la página completa como imagen en memoria
+                img_bytes = pix.tobytes("jpeg")  # Convierte el pixmap renderizado a bytes en formato JPEG
+                b64 = base64.b64encode(img_bytes).decode('utf-8')  # Codifica los bytes JPEG en texto Base64
+                imagenes_b64.append(b64)  # Agrega la imagen Base64 de esta página a la lista acumuladora
+
+            doc.close()  # Cierra el documento PDF para liberar la memoria utilizada
+            return None, None, imagenes_b64  # Retorna: texto(None), error(None), lista de imágenes Base64
+
+        except Exception as e:  # Captura cualquier fallo durante la lectura o renderizado del PDF
+            return None, f"[Error al leer PDF: {str(e)}]"  # Retorna el mensaje de error detallado
 
     # ── WORD (.docx) ────────────────────────────────────────────
     elif extension == '.docx':  # Verifica si es un documento de Microsoft Word
@@ -126,7 +129,7 @@ def extraer_contenido(archivo, extension):  # Recibe el objeto del archivo y su 
     elif extension == '.pptx':  # Verifica si es una presentación de Microsoft PowerPoint
         try:  # Intenta extraer el texto de todas las diapositivas y sus elementos
             from pptx import Presentation  # Importa python-pptx solo cuando se necesita
-            prs = Presentation(io.BytesIO(archivo.read()))  # Carga la presentación desde memoria sin guardarlo en disco
+            prs = Presentation(io.BytesIO(archivo.read()))  # Carga la presentación desde memoria sin guardarla en disco
             diapositivas = []  # Lista para acumular el texto de cada diapositiva
             for i, slide in enumerate(prs.slides, 1):  # Itera sobre cada diapositiva con su número de orden
                 textos = []  # Lista para el texto de los elementos de esta diapositiva
@@ -176,21 +179,19 @@ def procesar():  # Función que se ejecuta cada vez que el frontend envía un fo
             archivo = request.files['file']  # Obtiene el objeto completo del archivo enviado desde el frontend
             extension = os.path.splitext(archivo.filename)[1].lower()  # Extrae la extensión en minúsculas para comparación segura
 
-            # [PASO 3 INTEGRADO: MANEJO DE IMÁGENES Y MÚLTIPLES PÁGINAS]
-            resultado = extraer_contenido(archivo, extension)
-            if len(resultado) == 3:  # Imagen o PDF escaneado
-                _, error, datos_visuales = resultado
-                if error:
-                    contenido_extraido = error
-                elif isinstance(datos_visuales, list):
-                    # PDF escaneado: múltiples páginas como imágenes
-                    imagen_base64 = datos_visuales  # Es una lista de Base64
-                else:
-                    # Imagen suelta (JPG, PNG, etc.)
-                    imagen_base64 = datos_visuales  # Es un string Base64
-            else:
-                texto, error = resultado
-                contenido_extraido = texto if texto else (error or "")
+            resultado = extraer_contenido(archivo, extension)  # Llama a la función central de extracción
+
+            if len(resultado) == 3:  # Si retornó 3 valores es imagen suelta o PDF escaneado con Base64
+                _, error, datos_visuales = resultado  # Desempaqueta: texto ignorado, posible error, datos visuales
+                if error:  # Si hubo un error al procesar el archivo visual
+                    contenido_extraido = error  # Guarda el mensaje de error para informar al usuario
+                elif isinstance(datos_visuales, list):  # Si es una lista es un PDF escaneado con múltiples páginas
+                    imagen_base64 = datos_visuales  # Guarda la lista de imágenes Base64 (una por página)
+                else:  # Si es un string es una imagen suelta JPG, PNG, etc.
+                    imagen_base64 = datos_visuales  # Guarda el Base64 único de la imagen
+            else:  # Si retornó 2 valores es un archivo de texto normal PDF con texto, DOCX, TXT, etc.
+                texto, error = resultado  # Desempaqueta el texto extraído y el posible mensaje de error
+                contenido_extraido = texto if texto else (error or "")  # Usa el texto o el error si no se pudo leer
 
         system_msg = (  # Construye el mensaje de sistema que define el comportamiento y personalidad de Tutor AI
             "Tu nombre es exclusivamente 'Tutor AI'. Eres un experto de ingeniería de la USAC. "  # Define el nombre y rol académico del asistente
@@ -200,23 +201,27 @@ def procesar():  # Función que se ejecuta cada vez que el frontend envía un fo
             "en notación LaTeX estándar. No menciones bajo ninguna circunstancia nombres antiguos de desarrollo."  # Prohíbe mencionar nombres de versiones anteriores
         )
 
-        # ── Construcción del prompt según el tipo de entrada recibida [PASO 3 PROMPT VISUAL] ────
-        if imagen_base64:
-            # Construye el contenido visual (una imagen o varias páginas de PDF)
-            imagenes_lista = imagen_base64 if isinstance(imagen_base64, list) else [imagen_base64]
-            contenido_vision = []  # Lista de bloques para el mensaje de visión
-            for b64 in imagenes_lista:  # Agrega cada imagen como bloque separado
-                contenido_vision.append({
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
+        # ── Construcción del prompt según el tipo de entrada recibida ────
+        if imagen_base64:  # Si hay imagen suelta o páginas de PDF escaneado activa el modo visión
+            imagenes_lista = imagen_base64 if isinstance(imagen_base64, list) else [imagen_base64]  # Normaliza a lista siempre, sea una imagen o varias páginas
+
+            contenido_vision = []  # Lista de bloques que formarán el mensaje de visión para la IA
+            for b64 in imagenes_lista:  # Itera sobre cada imagen o página del PDF escaneado
+                contenido_vision.append({  # Agrega cada imagen como un bloque separado en el mensaje
+                    "type": "image_url",  # Tipo especial de la API para enviar imágenes en Base64
+                    "image_url": {  # Objeto con la URL de datos que contiene la imagen codificada
+                        "url": f"data:image/jpeg;base64,{b64}"  # Formato estándar Data URL para imágenes Base64
+                    }
                 })
-            contenido_vision.append({  # Agrega la instrucción de texto al final
-                "type": "text",
-                "text": texto_usuario if texto_usuario else "Analiza y explica detalladamente el contenido de estas páginas."
+
+            contenido_vision.append({  # Agrega la instrucción de texto del usuario al final de las imágenes
+                "type": "text",  # Tipo texto para la instrucción que acompaña a las imágenes
+                "text": texto_usuario if texto_usuario else "Analiza y explica detalladamente el contenido de estas páginas."  # Si no escribió nada solicita análisis general
             })
-            messages = [
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": contenido_vision}
+
+            messages = [  # Construye la lista de mensajes completa para enviar a la API
+                {"role": "system", "content": system_msg},  # Mensaje de sistema con las instrucciones de Tutor AI
+                {"role": "user", "content": contenido_vision}  # Mensaje del usuario con todas las imágenes y la instrucción de texto
             ]
 
         elif contenido_extraido:  # Si se extrajo texto de un documento construye el prompt combinado con contexto
@@ -252,6 +257,10 @@ def procesar():  # Función que se ejecuta cada vez que el frontend envía un fo
 
     except Exception as e:  # Captura cualquier error inesperado durante todo el procesamiento
         return jsonify({"error": str(e), "respuesta": f"Error interno: {str(e)}"}), 500  # Devuelve el error en JSON con código HTTP 500
+
+if __name__ == '__main__':  # Solo se ejecuta si este archivo se corre directamente
+    port = int(os.environ.get("PORT", 10000))  # Lee el puerto de las variables de entorno de Render o usa 10000 por defecto
+    app.run(host='0.0.0.0', port=port)  # Inicia el servidor Flask escuchando en todas las interfaces de red
 
 if __name__ == '__main__':  # Solo se ejecuta si este archivo se corre directamente
     port = int(os.environ.get("PORT", 10000))  # Lee el puerto de las variables de entorno de Render o usa 10000 por defecto
