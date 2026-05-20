@@ -61,22 +61,40 @@ def extraer_contenido(archivo, extension):  # Recibe el objeto del archivo y su 
         except Exception as e:  # Captura cualquier error de lectura sin detener el servidor
             return None, f"[Error leyendo archivo de texto: {str(e)}]"  # Retorna None y el mensaje de error
 
-    # ── PDF ─────────────────────────────────────────────────────
-    elif extension == '.pdf':  # Verifica si el archivo es un PDF
-        try:  # Intenta extraer el texto del PDF usando pypdf sin necesidad de GPU
-            from pypdf import PdfReader  # Importa el lector de PDF solo cuando se necesita para ahorrar memoria
-            reader = PdfReader(io.BytesIO(archivo.read()))  # Lee el PDF desde memoria sin guardarlo en disco
-            paginas = []  # Lista vacía para acumular el texto de cada página del documento
-            for pagina in reader.pages:  # Itera sobre cada página del PDF
-                texto = pagina.extract_text()  # Extrae el texto legible de la página actual
-                if texto:  # Solo agrega la página si contiene texto extraíble
-                    paginas.append(texto)  # Agrega el texto de la página a la lista acumuladora
-            contenido = "\n".join(paginas)  # Une el texto de todas las páginas con saltos de línea
-            if not contenido.strip():  # Si el PDF no tiene texto (puede ser un PDF escaneado como imagen)
-                return None, "[El PDF no contiene texto extraíble. Puede ser un PDF escaneado. Intenta convertirlo a imagen PNG.]"  # Informa la limitación al usuario
-            return contenido, None  # Retorna el texto completo extraído sin errores
-        except Exception as e:  # Captura cualquier fallo durante la lectura del PDF
-            return None, f"[Error al leer PDF: {str(e)}]"  # Retorna el mensaje de error detallado
+# ── PDF (texto normal Y escaneado) ──────────────────────────
+elif extension == '.pdf':  # Verifica si el archivo es un PDF
+    try:
+        from pypdf import PdfReader  # Intenta primero extraer texto seleccionable
+        pdf_bytes = archivo.read()  # Lee los bytes del PDF una sola vez en memoria
+        reader = PdfReader(io.BytesIO(pdf_bytes))  # Carga el PDF desde memoria
+        paginas = []  # Lista para acumular texto de cada página
+        for pagina in reader.pages:  # Itera sobre cada página
+            texto = pagina.extract_text()  # Intenta extraer texto seleccionable
+            if texto and texto.strip():  # Si la página tiene texto real
+                paginas.append(texto)  # Lo acumula
+
+        if paginas:  # Si encontró texto en al menos una página
+            return "\n".join(paginas), None  # Retorna el texto extraído normalmente
+
+        # Si no hay texto, es un PDF escaneado — lo convierte a imágenes
+        import fitz  # PyMuPDF para renderizar páginas como imágenes
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")  # Abre el PDF desde memoria
+        imagenes_b64 = []  # Lista para acumular imágenes Base64 de cada página
+        max_paginas = min(len(doc), 10)  # Limita a 10 páginas para no exceder la API
+
+        for num_pag in range(max_paginas):  # Itera sobre las páginas limitadas
+            pagina = doc[num_pag]  # Obtiene la página actual
+            mat = fitz.Matrix(1.5, 1.5)  # Escala de 1.5x para buena resolución sin exceder tamaño
+            pix = pagina.get_pixmap(matrix=mat)  # Renderiza la página como imagen en memoria
+            img_bytes = pix.tobytes("jpeg")  # Convierte el pixmap a bytes JPEG
+            b64 = base64.b64encode(img_bytes).decode('utf-8')  # Codifica en Base64
+            imagenes_b64.append(b64)  # Agrega la imagen de la página a la lista
+
+        doc.close()  # Cierra el documento para liberar memoria
+        return None, None, imagenes_b64  # Retorna lista de imágenes Base64 (una por página)
+
+    except Exception as e:
+        return None, f"[Error al leer PDF: {str(e)}]"
 
     # ── WORD (.docx) ────────────────────────────────────────────
     elif extension == '.docx':  # Verifica si es un documento de Microsoft Word
@@ -161,14 +179,20 @@ def procesar():  # Función que se ejecuta cada vez que el frontend envía un fo
             extension = os.path.splitext(archivo.filename)[1].lower()  # Extrae la extensión del archivo y la convierte a minúsculas para comparación segura
 
             resultado = extraer_contenido(archivo, extension)  # Llama a la función central de extracción pasándole el archivo y su extensión
-
-            if len(resultado) == 3:  # Si la función retornó 3 valores significa que el archivo es una imagen con Base64
-                _, error, imagen_base64 = resultado  # Desempaqueta: texto ignorado, posible error, y el Base64 de la imagen
-                if error:  # Si hubo un error al procesar la imagen
-                    contenido_extraido = error  # Guarda el mensaje de error como contenido para informar al usuario en la respuesta
-            else:  # Si retornó 2 valores es un archivo de texto normal como PDF, DOCX, TXT, etc.
-                texto, error = resultado  # Desempaqueta el texto extraído y el posible mensaje de error
-                contenido_extraido = texto if texto else (error or "")  # Usa el texto extraído o el mensaje de error si no se pudo leer
+            if len(resultado) == 3:  # Imagen o PDF escaneado
+                _, error, datos_visuales = resultado
+                
+                if error:
+                    contenido_extraido = error
+                elif isinstance(datos_visuales, list):
+                    # PDF escaneado: múltiples páginas como imágenes
+                    imagen_base64 = datos_visuales  # Es una lista de Base64
+                else:
+                    # Imagen suelta (JPG, PNG, etc.)
+                    imagen_base64 = datos_visuales  # Es un string Base64
+            else:
+                texto, error = resultado
+                contenido_extraido = texto if texto else (error or "")
 
         system_msg = (  # Construye el mensaje de sistema que define el comportamiento y personalidad de Tutor AI
             "Tu nombre es exclusivamente 'Tutor AI'. Eres un experto de ingeniería de la USAC. "  # Define el nombre y rol académico del asistente de IA
@@ -179,57 +203,24 @@ def procesar():  # Función que se ejecuta cada vez que el frontend envía un fo
         )
 
         # ── Construcción del prompt según el tipo de entrada recibida ────
-        if imagen_base64:  # Si el usuario subió una imagen se activa el modo de visión del modelo de IA
-            messages = [  # Construye la lista de mensajes con la imagen incrustada en formato Base64
-                {"role": "system", "content": system_msg},  # Mensaje de sistema con las instrucciones de comportamiento de Tutor AI
-                {
-                    "role": "user",  # Mensaje del usuario que combina la imagen y su instrucción de texto
-                    "content": [  # El contenido es una lista porque mezcla imagen y texto en un solo mensaje
-                        {
-                            "type": "image_url",  # Tipo especial de la API para enviar imágenes en formato Base64
-                            "image_url": {  # Objeto que contiene la URL de datos con la imagen codificada
-                                "url": f"data:image/jpeg;base64,{imagen_base64}"  # Formato estándar Data URL para imágenes Base64
-                            }
-                        },
-                        {
-                            "type": "text",  # Tipo texto para agregar la instrucción del usuario junto a la imagen
-                            "text": texto_usuario if texto_usuario else "Describe y analiza detalladamente el contenido de esta imagen."  # Si no escribió nada solicita un análisis general de la imagen
-                        }
-                    ]
-                }
+        if imagen_base64:
+            # Construye el contenido visual (una imagen o varias páginas de PDF)
+            imagenes_lista = imagen_base64 if isinstance(imagen_base64, list) else [imagen_base64]
+
+            contenido_vision = []  # Lista de bloques para el mensaje de visión
+            for b64 in imagenes_lista:  # Agrega cada imagen como bloque separado
+                contenido_vision.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
+                    })
+            contenido_vision.append({  # Agrega la instrucción de texto al final
+                "type": "text",
+                "text": texto_usuario if texto_usuario else "Analiza y explica detalladamente el contenido de estas páginas."
+            })
+            messages = [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": contenido_vision}
             ]
-        elif contenido_extraido:  # Si se extrajo texto de un documento adjunto construye el prompt combinado con contexto
-            prompt_final = (  # Une el contenido del archivo con la instrucción del usuario en un solo prompt
-                f"CONTEXTO DEL ARCHIVO SOPORTE:\n{contenido_extraido}\n\n"  # Inyecta el texto extraído del documento como contexto para la IA
-                f"INSTRUCCIÓN DEL ESTUDIANTE: {texto_usuario}"  # Agrega la pregunta o instrucción escrita o dictada por el usuario
-            )
-            messages = [  # Lista de mensajes estándar sin imagen para texto y documentos
-                {"role": "system", "content": system_msg},  # Mensaje de sistema con las instrucciones de Tutor AI
-                {"role": "user", "content": prompt_final}  # Mensaje del usuario con contexto del archivo y su pregunta
-            ]
-        else:  # Si no hay archivo adjunto el prompt es únicamente el texto escrito o dictado por el usuario
-            prompt_final = texto_usuario if texto_usuario else "Preséntate brevemente."  # Usa el texto del usuario o solicita una presentación breve si no escribió nada
-            messages = [  # Lista de mensajes simple solo con texto del usuario
-                {"role": "system", "content": system_msg},  # Mensaje de sistema con las instrucciones de comportamiento
-                {"role": "user", "content": prompt_final}  # Mensaje del usuario con su consulta de texto puro
-            ]
-
-        completion = client.chat.completions.create(  # Envía la solicitud completa a la API de DeepSeek para obtener la respuesta de la IA
-            model="deepseek-chat",  # Modelo de DeepSeek que procesará la consulta con soporte de texto y visión
-            messages=messages,  # Lista de mensajes construida dinámicamente según el tipo de archivo recibido
-            max_tokens=2048  # Limita la longitud de la respuesta a 2048 tokens para controlar tiempos y costos de API
-        )
-
-        respuesta = completion.choices[0].message.content  # Extrae el texto de la primera respuesta generada por el modelo de IA
-
-        nuevo = Historial(tipo=tipo_solicitud, respuesta=respuesta)  # Crea el objeto de registro con el tipo de solicitud y la respuesta obtenida
-        db.session.add(nuevo)  # Agrega el nuevo registro a la sesión activa de la base de datos pendiente de confirmación
-        db.session.commit()  # Confirma y guarda definitivamente el registro en el archivo SQLite en disco
-
-        return jsonify({"respuesta": respuesta})  # Devuelve la respuesta de la IA al frontend en formato JSON con la clave 'respuesta'
-
-    except Exception as e:  # Captura cualquier error inesperado que ocurra durante todo el procesamiento anterior
-        return jsonify({"error": str(e), "respuesta": f"Error interno: {str(e)}"}), 500  # Devuelve el detalle del error en JSON con código HTTP 500
 
 if __name__ == '__main__':  # Solo se ejecuta si este archivo se corre directamente y no es importado por otro módulo
     port = int(os.environ.get("PORT", 10000))  # Lee el puerto asignado por Render desde las variables de entorno o usa 10000 como valor por defecto
